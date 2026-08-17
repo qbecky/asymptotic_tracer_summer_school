@@ -130,7 +130,7 @@ DEFAULT_TARGET_DIAGONAL = 3.0 ** 0.5 * 250.0  # mm, this project's usual ~250mm-
 DATA_DIR = ROOT / "data"
 
 state = dict(curves={}, next_id=0, redo_stack=[], last=None, spacing=0.18 * SCALE,
-             n_curves=5, max_length=8.0 * SCALE, radius=CURVE_RADIUS, width=0.5, height=5.0,
+             n_curves=5, max_length=8.0 * SCALE, radius=CURVE_RADIUS, width=0.5, height=10.0,
              export_name="default", mesh_name=None, V=None, F=None, VN=None, fld=None,
              tr=None, data_files=[], data_idx=0, target_diagonal=DEFAULT_TARGET_DIAGONAL,
              msg="ctrl-click the surface, then trace")

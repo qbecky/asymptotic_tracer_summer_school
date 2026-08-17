@@ -39,8 +39,7 @@ bidirectionally from the seed.
 **Curve quantities.** Along each curve, surface normals are interpolated
 barycentrically from vertex normals and the Darboux quantities kappa_g,
 kappa_n, tau_g are evaluated by central differences after uniform arclength
-resampling. For asymptotic curves, kappa_n = 0 and (Beltrami--Enneper)
-tau_g^2 = -K; both identities serve as validation criteria.
+resampling. For asymptotic curves, kappa_n = 0.
 
 ## Repository structure
 
@@ -78,7 +77,7 @@ pip/venv setups).
 ## Usage
 
 ```
-python exp/03_interactive_ui.py [data/<mesh>.obj]
+python exp/interactive_ui.py
 ```
 
 Opens a polyscope viewer showing the estimated Gaussian curvature K and both
