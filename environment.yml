@@ -1,0 +1,7 @@
+name: asymptotic_tracer_dtu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy>=1.24
+  - polyscope>=2.0
