@@ -415,7 +415,7 @@ def _load_surface(name):
     ps.remove_surface_mesh(MESH_NAME, error_if_absent=False)
     mesh = ps.register_surface_mesh(MESH_NAME, V, F, smooth_shade=True)
     mesh.add_scalar_quantity("K (estimated)", fld.K, defined_on="faces",
-                             enabled=True, cmap="viridis")
+                             enabled=False, cmap="viridis")
     mesh.add_vector_quantity("asymptotic dir A", fld.dirs[:, 0],
                              defined_on="faces", color=FAMILY_COLORS[0])
     mesh.add_vector_quantity("asymptotic dir B", fld.dirs[:, 1],

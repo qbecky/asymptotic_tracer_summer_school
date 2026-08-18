@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Claude
+.claude/
+
+# Generated output (heavy, regenerable)
+output/
+
+.polyscope.ini
+imgui.ini
+src/curvature_sol.py
+
+# CMake build tree, and its generated python package shims (see
+# python/*/init_template.py in the vendored submodules) -- absolute paths
+# baked in, regenerated on every configure
+build/
+python/
+
+# Images and animations
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.svg
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp

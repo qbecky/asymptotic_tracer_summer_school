@@ -135,7 +135,11 @@ def compute_shape_operator(t1, t2, Tf):
         Symmetric shape operator in the (t1, t2) frame, with
         S[:, a, b] = t_a^T Tf t_b.
     """
-    raise NotImplementedError("TODO: restrict Tf to the (t1, t2) frame")
+    S = np.empty((Tf.shape[0], 2, 2))
+    S[:, 0, 0] = np.einsum('ij,ijk,ik->i', t1, Tf, t1)
+    S[:, 1, 1] = np.einsum('ij,ijk,ik->i', t2, Tf, t2)
+    S[:, 0, 1] = S[:, 1, 0] = np.einsum('ij,ijk,ik->i', t1, Tf, t2)
+    return S
 
 
 def face_shape_operators_quadratic_heightfield(V, F, depth=2):
