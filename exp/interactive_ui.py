@@ -81,8 +81,15 @@ Export (Fabrication subsection):
   width/height fields, mm) with a comb/finger-joint notch
   (src.fabrication.default_flap_slits) at every joint -- family-A rods
   notched from one edge, family-B from the other, so crossing strips
-  interlock flush -- packed left-aligned and stacked into one SVG at
-  output/ui_fabrication.svg. See src/fabrication.py.
+  interlock flush -- packed left-aligned and stacked into one SVG at a new,
+  numbered output/<trial name>_<NNN>/geom/fabrication.svg (src.rundir.new_trial,
+  same "trial name" field as "Export trial (net.json)"). Alongside it, writes
+  geom/fabrication_guide.svg (src.fabrication.pack_svg_guide): the same
+  outlines, but with the identity of the OTHER family's beam engraved inside
+  each slit (e.g. beam A0's guide shows "B3" sitting in the slit where rod B3
+  crosses it) -- a reference for assembly, not meant to be cut from (its
+  guide text uses a third color, distinct from the cut and label colors).
+  See src/fabrication.py.
 
 Curves are tracked in `state["curves"]`, a dict keyed by a stable
 ever-incrementing id (not list position), so deleting one from the middle
@@ -114,7 +121,8 @@ from src import field as fld_mod  # noqa: E402
 from src import meshio, rundir    # noqa: E402
 from src.crossings import find_crossings  # noqa: E402
 from src.fabrication import (beam_outline, default_flap_slits,  # noqa: E402
-                             label_position, layout_from_joints, pack_svg)
+                             joint_label_position, label_position,
+                             layout_from_joints, pack_svg, pack_svg_guide)
 from src.geometry import nearest_face_xy, vertex_normals  # noqa: E402
 from src.surfaces import SCALE    # noqa: E402
 from src.tracer import Tracer     # noqa: E402
@@ -125,7 +133,7 @@ MIN_CURVE_POINTS = 5             # minimum sample count for a curve to be export
 TOL = 0.09 * SCALE                 # crossing-detection tolerance (mm)
 H = 0.04 * SCALE                     # re-discretization spacing (mm), used before export/crossing detection
 CURVE_RADIUS = 0.00005 * SCALE  # display-only tube radius (mm)
-DEFAULT_TARGET_DIAGONAL = 3.0 ** 0.5 * 250.0  # mm, this project's usual ~250mm-box scale
+DEFAULT_TARGET_DIAGONAL = 300.0  # mm
 
 DATA_DIR = ROOT / "data"
 
@@ -326,33 +334,46 @@ def _export_fabrication():
 
     crossings = [c for c in crossings if _valid(c)]
 
+    # Each entry also carries the OTHER family's beam label crossing there
+    # (e.g. "B3"), purely for the assembly guide -- layout_from_joints below
+    # only reads the (s, side) part of each tuple.
     per_rod = {}
     for c in crossings:
-        per_rod.setdefault(('A', c.a_idx), []).append((c.s_a, 0))
-        per_rod.setdefault(('B', c.b_idx), []).append((c.s_b, 1))
+        per_rod.setdefault(('A', c.a_idx), []).append((c.s_a, 0, f"B{c.b_idx}"))
+        per_rod.setdefault(('B', c.b_idx), []).append((c.s_b, 1, f"A{c.a_idx}"))
 
     overhang = state["height"] / 2.0
     slit0, slit1, notch_len, depth = default_flap_slits(state["height"], state["width"])
     beams = []
+    guide_beams = []
     for fam_label, curves in (('A', fam0), ('B', fam1)):
         for idx in range(len(curves)):
             key = (fam_label, idx)
             if key not in per_rod:
                 continue
-            strip_length, local = layout_from_joints(per_rod[key], overhang)
+            joints = [(s, side) for s, side, _partner in per_rod[key]]
+            strip_length, local = layout_from_joints(joints, overhang)
             shapes = beam_outline(local, strip_length, state["height"], notch_len,
                                   depth=depth, slit=slit0, slit1=slit1)
             pos = label_position(local, state["height"])
-            beams.append((shapes, f"{fam_label}{idx}", pos))
+            label = f"{fam_label}{idx}"
+            beams.append((shapes, label, pos))
+            joint_labels = [
+                (*joint_label_position(x, side, state["height"], depth), partner)
+                for (x, side), (_s, _side, partner) in zip(local, per_rod[key])
+            ]
+            guide_beams.append((shapes, label, pos, joint_labels))
 
     if not beams:
         state["msg"] = "no crossings found -- trace a net first"
         return
 
-    out = ROOT / "output" / "ui_fabrication.svg"
-    out.parent.mkdir(exist_ok=True)
+    run = rundir.new_trial(state["export_name"])
+    out = run / "geom" / "fabrication.svg"
     out.write_text(pack_svg(beams))
-    state["msg"] = f"fabrication: {len(beams)} beams -> {out.relative_to(ROOT)}"
+    guide_out = run / "geom" / "fabrication_guide.svg"
+    guide_out.write_text(pack_svg_guide(guide_beams))
+    state["msg"] = f"fabrication: {len(beams)} beams -> {out.relative_to(ROOT)} (+ guide)"
 
 
 def _export_trial():

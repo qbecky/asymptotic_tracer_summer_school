@@ -56,6 +56,16 @@ slit-free spot for a beam's identifying label. `pack_svg` lays a list of
 laser-ready SVG document (units = mm), each labeled in a different color so
 the label reads as "engrave, don't cut" rather than a third cut path.
 
+`joint_label_position` + `pack_svg_guide` build an assembly-guide variant of
+that same packed sheet: alongside each beam's own identifying label,
+`pack_svg_guide` also engraves, right inside each slit, the identity of the
+OTHER family's beam that notches through it there (e.g. beam A0's sheet
+shows "B3" sitting in the slit where rod B3 crosses it) -- so the guide
+answers "which beam goes in this slit?" by eye during assembly, without
+consulting the joint list separately. It is not meant to be cut from (hence
+a third, distinct color from CUT_COLOR/LABEL_COLOR) -- print or view it
+alongside the plain `pack_svg` output, which stays the actual cut file.
+
 Note: labels are emitted as raw SVG <text>, not vector outlines -- some
 laser-cutting software requires text converted to paths before it will
 engrave it; that conversion is out of scope here.
@@ -63,7 +73,8 @@ engrave it; that conversion is out of scope here.
 import functools
 
 CUT_COLOR = "#000000"
-LABEL_COLOR = "#ff0000"
+LABEL_COLOR = "#0000ff"
+GUIDE_COLOR = "#ff0000"
 
 
 def layout_from_joints(joints, overhang):
@@ -180,7 +191,7 @@ def flaps_slit_fam1(notch_len, depth, n_flaps, ribbon_width):
     return pts
 
 
-def default_flap_slits(ribbon_width, ribbon_thickness, n_flaps=2):
+def default_flap_slits(ribbon_width, ribbon_thickness, n_flaps=1):
     """This project's default slit design: flaps_slit_fam0/_fam1 (a comb/
     finger-joint notch, with more glue/friction surface than a plain
     rectangular half-lap), sized off the beam's own cross-section --
@@ -303,6 +314,17 @@ def label_position(local_joints, width):
     return x, width / 2.0
 
 
+def joint_label_position(x, side, width, depth):
+    """Local (x, y) anchor for one joint's crossing-beam label (for
+    pack_svg_guide), centered on the slit at local beam-x `x` and sunk
+    half-way into the notch's own depth from whichever edge it's cut from
+    -- depth/2 from y=0 for side 0, depth/2 up from y=width for side 1 --
+    so the text sits on the crossing beam's actual footprint rather than out
+    on the strip's plain body."""
+    y = depth / 2.0 if side == 0 else width - depth / 2.0
+    return x, y
+
+
 def pack_svg(beams, gap=1.0, margin=5.0):
     """beams: [(shapes, label, label_xy), ...] -- shapes: a list of
     independent (x, y) mm polylines, as returned by beam_outline() (local
@@ -339,6 +361,55 @@ def pack_svg(beams, gap=1.0, margin=5.0):
                 f'<text x="{margin + lx:.3f}" y="{y_cursor + ly:.3f}" '
                 f'font-size="{0.6 * beam_w:.3f}" fill="{LABEL_COLOR}" '
                 f'text-anchor="middle" dominant-baseline="middle">{label}</text>')
+        y_cursor += beam_w + gap
+
+    canvas_w = max_len + 2.0 * margin
+    canvas_h = y_cursor - gap + margin
+    header = (f'<svg xmlns="http://www.w3.org/2000/svg" '
+             f'width="{canvas_w:.3f}mm" height="{canvas_h:.3f}mm" '
+             f'viewBox="0 0 {canvas_w:.3f} {canvas_h:.3f}">')
+    return header + "".join(body) + "</svg>"
+
+
+def pack_svg_guide(beams, gap=1.0, margin=5.0):
+    """Assembly-guide variant of pack_svg: same beam outlines, packed the
+    same left-aligned, top-to-bottom way, but each beam's tuple carries a
+    fourth element, `joint_labels` -- [(x, y, text), ...] in the beam's own
+    local frame (e.g. from joint_label_position), one entry per slit --
+    engraved as small GUIDE_COLOR text centered on that slit, naming the
+    OTHER family's beam that crosses through it there. So a beam's sheet
+    doubles as an assembly aid: e.g. beam A0's guide shows "B3" sitting
+    inside the slit where rod B3 notches in, alongside A0's own label --
+    without needing to cross-reference the joint list separately.
+
+    beams: [(shapes, label, label_xy, joint_labels), ...]. Not a cut file --
+    GUIDE_COLOR is a third color distinct from CUT_COLOR/LABEL_COLOR so a
+    laser workflow that only reacts to CUT_COLOR ignores these engravings
+    same as it already ignores LABEL_COLOR ones. Returns a complete SVG
+    document string, same conventions as pack_svg."""
+    if not beams:
+        raise ValueError("no beams to pack")
+    max_len = max(max(x for shape in shapes for x, _y in shape)
+                  for shapes, _label, _pos, _joints in beams)
+
+    y_cursor = margin
+    body = []
+    for shapes, label, (lx, ly), joint_labels in beams:
+        beam_w = max(y for shape in shapes for _x, y in shape)
+        for shape in shapes:
+            pts = " ".join(f"{x + margin:.3f},{y + y_cursor:.3f}" for x, y in shape)
+            body.append(f'<polyline points="{pts}" fill="none" '
+                        f'stroke="{CUT_COLOR}" stroke-width="0.1"/>')
+        if label:
+            body.append(
+                f'<text x="{margin + lx:.3f}" y="{y_cursor + ly:.3f}" '
+                f'font-size="{0.6 * beam_w:.3f}" fill="{LABEL_COLOR}" '
+                f'text-anchor="middle" dominant-baseline="middle">{label}</text>')
+        for jx, jy, text in joint_labels:
+            body.append(
+                f'<text x="{margin + jx:.3f}" y="{y_cursor + jy:.3f}" '
+                f'font-size="{0.35 * beam_w:.3f}" fill="{GUIDE_COLOR}" '
+                f'text-anchor="middle" dominant-baseline="middle">{text}</text>')
         y_cursor += beam_w + gap
 
     canvas_w = max_len + 2.0 * margin

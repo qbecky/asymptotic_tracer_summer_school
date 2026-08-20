@@ -1,14 +1,18 @@
 """Face-walking tracer for asymptotic line fields on triangle meshes.
 
 The tracer advances a state (face f, point p in f, direction d in the plane of
-f, family l). In each face the piecewise-constant field direction of family l
-is re-evaluated; the incoming direction is used *only* to resolve the sign of
-the line field (branch continuity), never integrated, so no extrinsic drift is
-accumulated. The exit point is obtained by exact ray/edge intersection in the
-2D face frame, hence every polyline vertex lies on a mesh edge and the scheme
+f). In each face both of the field's candidate directions (field.dirs[f, 0]
+and field.dirs[f, 1]) are re-evaluated, and the incoming direction picks which
+one to follow -- whichever is closer as an unoriented line -- and its sign;
+neither is ever integrated, so no extrinsic drift is accumulated. This makes
+the walk robust to any local error in field._label_families's precomputed,
+globally-propagated family labeling: branch continuity is re-derived from the
+actual incoming direction at every face, not trusted from that precomputed
+label. The exit point is obtained by exact ray/edge intersection in the 2D
+face frame, hence every polyline vertex lies on a mesh edge and the scheme
 requires no step-size parameter. Crossing an edge, the direction is transported
 by the hinge map (rotation by the dihedral angle about the edge) before the
-sign of the next face's field is resolved.
+next face's branch and sign are resolved.
 
 Termination: mesh boundary, non-hyperbolic neighbor (K > -eps_K), length cap,
 step cap, or a degenerate configuration.
@@ -97,12 +101,13 @@ class Tracer:
             nbr = faces[1] if faces[0] == f else faces[0]
         return q, key, nbr
 
-    def _trace_one(self, f0, p0, d0, family, max_steps, max_length):
+    def _trace_one(self, f0, p0, d0, max_steps, max_length):
         pts, fcs = [p0], []
         f, p, d, entry = f0, p0, d0, None
         length, reason = 0.0, 'max_steps'
         for _ in range(max_steps):
-            dfam = self.field.dirs[f, family]
+            cands = self.field.dirs[f]                # (2, 3): both candidate lines
+            dfam = cands[int(np.argmax(np.abs(cands @ d)))]
             if dfam @ d < 0.0:
                 dfam = -dfam
             r = self._step(f, p, dfam, entry)
@@ -133,9 +138,9 @@ class Tracer:
             raise ValueError("seed face is not hyperbolic")
         p0 = self.sanitize_seed(f0, p0)
         d0 = self.field.dirs[f0, family]
-        fw_p, fw_f, fw_r = self._trace_one(f0, p0, d0, family,
+        fw_p, fw_f, fw_r = self._trace_one(f0, p0, d0,
                                            max_steps, 0.5 * max_length)
-        bw_p, bw_f, bw_r = self._trace_one(f0, p0, -d0, family,
+        bw_p, bw_f, bw_r = self._trace_one(f0, p0, -d0,
                                            max_steps, 0.5 * max_length)
         pts = np.array(bw_p[::-1][:-1] + fw_p)
         fcs = np.array(bw_f[::-1] + fw_f, dtype=int)

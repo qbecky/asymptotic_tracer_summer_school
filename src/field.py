@@ -14,7 +14,8 @@ from collections import deque
 
 import numpy as np
 
-from .curvature import face_shape_operators_quadratic_heightfield
+# from .curvature import face_shape_operators_quadratic_heightfield
+from .curvature_sol import face_shape_operators_quadratic_heightfield
 from .geometry import face_neighbors, normalize
 
 
@@ -40,7 +41,8 @@ class AsymptoticField:
         """Angle 2*phi between the two families, in degrees (hyperbolic faces)."""
         c = np.abs(np.einsum('ij,ij->i',
                              self.dirs[:, 0], self.dirs[:, 1]))
-        ang = np.degrees(np.arccos(np.clip(c, 0.0, 1.0)))
+        s = np.linalg.norm(np.cross(self.dirs[:, 0], self.dirs[:, 1]), axis=1)
+        ang = np.degrees(np.arctan2(s, c))
         return ang[self.hyperbolic]
 
 
