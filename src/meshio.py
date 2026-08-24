@@ -49,3 +49,27 @@ def save_curves_json(path, payload):
         raise TypeError(type(o))
     with open(path, 'w') as fh:
         json.dump(payload, fh, default=default, indent=1)
+
+
+def save_curve_network(path, curves):
+    """Write TraceResult-like objects (attrs family, points, faces,
+    stop_backward, stop_forward) to `path` as JSON at full fidelity: raw,
+    unresampled points and their per-segment mesh face indices. This is
+    what makes load_curve_network's round trip exact -- unlike
+    save_curves_json's trial export (H-resampled, no face indices), a
+    reloaded curve still has the .faces a rail needs to seed further nets,
+    or to be re-exported."""
+    payload = {"curves": [
+        {"family": r.family, "points": r.points, "faces": r.faces,
+         "stop_backward": r.stop_backward, "stop_forward": r.stop_forward}
+        for r in curves
+    ]}
+    save_curves_json(path, payload)
+
+
+def load_curve_network(path):
+    """Inverse of save_curve_network: returns the raw list of curve dicts
+    (plain JSON types). The caller reconstructs TraceResult objects --
+    meshio doesn't import src.tracer, to keep this module dependency-free."""
+    with open(path) as fh:
+        return json.load(fh)["curves"]

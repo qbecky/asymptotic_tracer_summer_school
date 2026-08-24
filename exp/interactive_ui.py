@@ -21,6 +21,22 @@ Import:
   the command line (or data/EnneperSurfaceExample.obj by default) is loaded
   at startup with the default target diagonal.
 
+Curve network (save/load):
+* "Save curve network (+ surface)" writes the currently traced curves AND
+  the surface they were traced on (state["V"]/state["F"], the same rescaled
+  copy their face indices index into) to a fresh
+  output/sessions/<save as>_<NNN>/ directory, as surface.obj + curves.json
+  (src.meshio.save_curve_network). Unlike "Export trial (net.json)", points
+  are NOT resampled and each curve's per-segment face indices are kept, so
+  this round-trips exactly.
+* The dropdown lists every previously saved output/sessions/*/; pick one and
+  press "Load curve network" to restore it -- like "Load surface", this
+  discards any currently traced curves, rebuilds the asymptotic field and
+  tracer for the saved surface, and re-registers it in polyscope, then
+  reconstructs and re-registers every saved curve so tracing (e.g. "Trace
+  net from last curve"), undo/redo, and export can all continue on them
+  exactly as if they'd just been traced in this session.
+
 Tracing:
 * The surface is shown with the estimated Gaussian curvature K as a scalar
   field and the two asymptotic direction fields as face vector quantities.
@@ -125,7 +141,7 @@ from src.fabrication import (beam_outline, default_flap_slits,  # noqa: E402
                              layout_from_joints, pack_svg, pack_svg_guide)
 from src.geometry import nearest_face_xy, vertex_normals  # noqa: E402
 from src.surfaces import SCALE    # noqa: E402
-from src.tracer import Tracer     # noqa: E402
+from src.tracer import Tracer, TraceResult  # noqa: E402
 
 MESH_NAME = "surface"
 FAMILY_COLORS = ((0.12, 0.47, 0.71), (0.84, 0.15, 0.16))
@@ -151,6 +167,7 @@ state = dict(curves={}, next_id=0, redo_stack=[], last=None, spacing=0.18 * SCAL
              n_curves=5, max_length=8.0 * SCALE, radius=CURVE_RADIUS, width=0.5, height=10.0,
              export_name="default", mesh_name=None, V=None, F=None, VN=None, fld=None,
              tr=None, data_files=[], data_idx=0, target_diagonal=DEFAULT_TARGET_DIAGONAL,
+             session_name="default", session_idx=0,
              msg="ctrl-click the surface, then trace")
 
 
@@ -421,17 +438,14 @@ def _export_trial():
     state["msg"] = f"exported {len(state['curves'])} curves -> {run.relative_to(ROOT)}"
 
 
-def _load_surface(name):
-    """(Re)load data/<name>, uniformly rescaled so its axis-aligned bounding
-    box diagonal equals state["target_diagonal"] (mm), rebuild the
-    asymptotic field and tracer from scratch, and re-register the polyscope
-    surface -- discarding any curves already traced, since they belong to
-    the previous mesh's faces/geometry and wouldn't make sense on this one.
-    Used both at startup and by the "Load surface" button."""
-    path = DATA_DIR / name
-    V, F = meshio.load_obj(path)
-    diag = float(np.linalg.norm(V.max(axis=0) - V.min(axis=0)))
-    V = V * (state["target_diagonal"] / diag)
+def _apply_surface(V, F, name):
+    """Rebuild the asymptotic field/tracer for (V, F) and re-register the
+    polyscope surface + its scalar/vector quantities -- discarding any
+    curves already traced, since they belong to the previous mesh's
+    faces/geometry and wouldn't make sense on this one. Shared by
+    _load_surface (data/<name>.obj, rescaled to target_diagonal) and
+    _load_network (surface.obj written verbatim by "Save curve network",
+    already at its saved scale)."""
     fld = fld_mod.from_estimated_curvature(V, F)
     tr = Tracer(fld)
 
@@ -440,7 +454,7 @@ def _load_surface(name):
     state["curves"].clear()
     state["redo_stack"].clear()
     state["last"] = None
-    state.update(V=V, F=F, VN=vertex_normals(V, F), mesh_name=Path(path).stem,
+    state.update(V=V, F=F, VN=vertex_normals(V, F), mesh_name=name,
                 fld=fld, tr=tr)
 
     ps.remove_surface_mesh(MESH_NAME, error_if_absent=False)
@@ -451,7 +465,53 @@ def _load_surface(name):
                              defined_on="faces", color=FAMILY_COLORS[0])
     mesh.add_vector_quantity("asymptotic dir B", fld.dirs[:, 1],
                              defined_on="faces", color=FAMILY_COLORS[1])
+
+
+def _load_surface(name):
+    """(Re)load data/<name>, uniformly rescaled so its axis-aligned bounding
+    box diagonal equals state["target_diagonal"] (mm) -- see _apply_surface
+    for what happens next. Used both at startup and by the "Load surface"
+    button."""
+    path = DATA_DIR / name
+    V, F = meshio.load_obj(path)
+    diag = float(np.linalg.norm(V.max(axis=0) - V.min(axis=0)))
+    V = V * (state["target_diagonal"] / diag)
+    _apply_surface(V, F, Path(path).stem)
     state["msg"] = f"loaded {name} (AABB diagonal -> {state['target_diagonal']:.1f}mm)"
+
+
+def _save_network():
+    """Persist the current curve network AND the surface it was traced on
+    (state["V"]/state["F"], the same rescaled copy the curves' face indices
+    index into) to a fresh output/sessions/<session_name>_<NNN>/, as
+    surface.obj + curves.json (src.meshio.save_curve_network) -- full
+    fidelity (raw, unresampled points and per-segment face indices), unlike
+    "Export trial (net.json)"'s H-resampled export, so "Load curve network"
+    can reconstruct the exact same TraceResult objects."""
+    if not state["curves"]:
+        state["msg"] = "no curves to save"
+        return
+    run = rundir.new_session(state["session_name"])
+    meshio.save_obj(run / "surface.obj", state["V"], state["F"])
+    meshio.save_curve_network(run / "curves.json", state["curves"].values())
+    state["msg"] = f"saved {len(state['curves'])} curves + surface -> {run.relative_to(ROOT)}"
+
+
+def _load_network(name):
+    """Load a curve network + its surface previously written by "Save curve
+    network" (output/sessions/<name>/{surface.obj,curves.json}): restores
+    V/F/field/tracer and the polyscope surface via _apply_surface (surface.obj
+    is loaded as-is, already at its saved scale, no rescaling), then
+    reconstructs and re-registers every saved curve as a TraceResult."""
+    run = rundir.resolve_session(name)
+    V, F = meshio.load_obj(run / "surface.obj")
+    _apply_surface(V, F, name)
+    for c in meshio.load_curve_network(run / "curves.json"):
+        res = TraceResult(np.asarray(c["points"], float),
+                          np.asarray(c["faces"], int), int(c["family"]),
+                          c["stop_backward"], c["stop_forward"])
+        _add_curve(res)
+    state["msg"] = f"loaded {len(state['curves'])} curves + surface from {name}"
 
 
 def main():
@@ -475,6 +535,26 @@ def main():
             "target AABB diagonal (mm)", state["target_diagonal"])
         if psim.Button("Load surface"):
             _load_surface(state["data_files"][state["data_idx"]])
+
+        psim.Spacing()
+        psim.Separator()
+        psim.TextUnformatted("Curve network (save/load; also saves/loads the surface)")
+        psim.Separator()
+        sessions = rundir.session_list()
+        if sessions:
+            state["session_idx"] = min(state["session_idx"], len(sessions) - 1)
+            _, state["session_idx"] = psim.Combo(
+                "saved network", state["session_idx"], sessions)
+            if psim.Button("Load curve network"):
+                if sessions:
+                    _load_network(sessions[state["session_idx"]])
+                else:
+                    state["msg"] = "no saved curve networks yet"
+        else:
+            psim.TextUnformatted("(no saved curve networks yet)")
+        _, state["session_name"] = psim.InputText("save as", state["session_name"])
+        if psim.Button("Save curve network (+ surface)"):
+            _save_network()
 
         psim.Spacing()
         psim.Separator()

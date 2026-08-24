@@ -2,14 +2,15 @@
 
 The tracer advances a state (face f, point p in f, direction d in the plane of
 f). In each face both of the field's candidate directions (field.dirs[f, 0]
-and field.dirs[f, 1]), in both signs, are re-evaluated; any of the four whose
-component orthogonal to the edge just crossed points back across it (i.e. into
-the previous face) is discarded, and the incoming direction picks which of the
-survivors to follow -- whichever is closest to it. That orthogonal component
-is skipped (no discarding) when the incoming direction is nearly parallel to
-the edge (a grazing crossing, Tracer.graze_eps), since its direction is then
-floating-point noise rather than signal. Neither candidate is ever
-integrated, so no extrinsic drift is accumulated. This makes
+and field.dirs[f, 1]) are re-evaluated, and the incoming direction picks which
+one to follow -- whichever is closer as an unoriented line -- and its sign.
+That pick is overridden by the other candidate only when it clearly heads
+back across the edge just crossed (i.e. into the previous face), by more than
+a cosine margin (Tracer.backtrack_margin) so ordinary noise can't trip it;
+this check itself is skipped when the incoming direction is nearly parallel
+to that edge (a grazing crossing, Tracer.graze_eps), since the component it's
+based on is floating-point noise rather than signal there. Neither candidate
+is ever integrated, so no extrinsic drift is accumulated. This makes
 the walk robust to any local error in field._label_families's precomputed,
 globally-propagated family labeling: branch continuity is re-derived from the
 actual incoming direction at every face, not trusted from that precomputed
@@ -45,7 +46,7 @@ class TraceResult:
 
 class Tracer:
     def __init__(self, field, vertex_eps=1e-4, t_eps=1e-12, graze_eps=0.05,
-                s_eps=5e-2):
+                s_eps=1e-1, backtrack_margin=0.3):
         self.field = field
         V, F = field.V, field.F
         self.V, self.F = V, F
@@ -67,6 +68,11 @@ class Tracer:
         # crossed, a near-tangential/grazing crossing) means that vector's
         # direction is floating-point noise, not signal -- see _trace_one
         self.graze_eps = graze_eps
+        # cosine margin for the anti-backtrack check in _trace_one: the
+        # natural pick must be more than acos(-backtrack_margin) from "into
+        # the face" before it's overridden by the other candidate, so noise
+        # in the edge-crossing reference can't force a wrong pick
+        self.backtrack_margin = backtrack_margin
 
     # ------------------------------------------------------------------ #
     def sanitize_seed(self, f, p, min_bary=1e-3):
@@ -122,20 +128,24 @@ class Tracer:
         f, p, d, entry = f0, p0, d0, None
         length, reason = 0.0, 'max_steps'
         for _ in range(max_steps):
-            cands = self.field.dirs[f].copy()                # (2, 3): both candidate lines
-            candsAll = np.concatenate([cands, -cands], axis=0)  # (4, 3): both candidates with both signs
+            cands = self.field.dirs[f]                # (2, 3): both candidate lines
+            i_best = int(np.argmax(np.abs(cands @ d)))
+            signed = np.where((cands @ d)[:, None] >= 0.0, cands, -cands)
+            dfam = signed[i_best]                      # natural pick: closest to d
             if entry is not None:
                 ei, ej = entry
                 e_hat = self.V[ej] - self.V[ei]
                 e_hat /= np.linalg.norm(e_hat)
                 ref = d - (d @ e_hat) * e_hat      # keep only the component crossing the edge
-                if np.linalg.norm(ref) >= self.graze_eps:
-                    # filter out the candidates that point back across the edge just entered
-                    candsAll = candsAll[candsAll @ ref >= 0.0]
+                ref_norm = np.linalg.norm(ref)
+                if ref_norm >= self.graze_eps:
+                    ref_hat = ref / ref_norm
+                    if dfam @ ref_hat < -self.backtrack_margin:  # clearly heads back
+                        other = signed[1 - i_best]
+                        if other @ ref_hat >= -self.backtrack_margin:
+                            dfam = other
                 # else: d is nearly parallel to the edge (a grazing crossing) --
-                # ref's direction is noise here, not signal, so skip the filter
-            i_best = int(np.argmax(candsAll @ d))
-            dfam = candsAll[i_best]
+                # ref's direction is noise here, not signal, so skip the check
             r = self._step(f, p, dfam, entry)
             if r is None:
                 reason = 'degenerate'
