@@ -130,8 +130,18 @@ from src.tracer import Tracer     # noqa: E402
 MESH_NAME = "surface"
 FAMILY_COLORS = ((0.12, 0.47, 0.71), (0.84, 0.15, 0.16))
 MIN_CURVE_POINTS = 5             # minimum sample count for a curve to be exportable
-TOL = 0.09 * SCALE                 # crossing-detection tolerance (mm)
 H = 0.04 * SCALE                     # re-discretization spacing (mm), used before export/crossing detection
+# Crossing-detection tolerance (mm): a closest-approach distance below this
+# counts as a joint. A genuine crossing's gap is bounded by resampling
+# discretization error (a couple hundredths of a mm, worst case, across this
+# project's sample meshes); a spurious near-miss (two curves merely passing
+# close without truly meeting) sits at least an order of magnitude above
+# that. The old 0.09*SCALE (11.25mm) was loose enough to accept such
+# near-misses as extra "crossings" alongside a real one on the same curve
+# pair -- visible as one beam's partner label engraved twice in the assembly
+# guide for a single true joint. Tying TOL to H, well under it, fixes that
+# without capping how many times a pair is allowed to genuinely cross.
+TOL = 0.1 * H                          # crossing-detection tolerance (mm)
 CURVE_RADIUS = 0.00005 * SCALE  # display-only tube radius (mm)
 DEFAULT_TARGET_DIAGONAL = 300.0  # mm
 
